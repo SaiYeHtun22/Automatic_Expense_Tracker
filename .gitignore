@@ -1,0 +1,37 @@
+# Built application files
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Android Studio / IntelliJ IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# Gradle & Build folders (Recursive)
+.gradle/
+build/
+app/build/
+
+# Local configuration & Secrets (NEVER UPLOAD)
+local.properties
+*.jks
+*.keystore
+*keystore.properties
+
+# Android Profiling & Logs
+*.hprof
+*.log
+trace.html
+
+# OS-specific temporary junk
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
