@@ -95,7 +95,22 @@ class VoiceInputActivity : ComponentActivity() {
         if (match != null) {
             val amount = match.groupValues[1].toDoubleOrNull()
             if (amount != null) {
-                saveTransaction(amount, text)
+                // Determine currency from spoken text
+                val lowerText = text.lowercase()
+                val detectedCurrency = when {
+                    lowerText.contains("kyat") || lowerText.contains("ks") || lowerText.contains("mmk") -> "Ks"
+                    lowerText.contains("baht") || lowerText.contains("thb") -> "฿"
+                    lowerText.contains("dollar") || lowerText.contains("usd") -> "$"
+                    lowerText.contains("euro") -> "€"
+                    lowerText.contains("pound") -> "£"
+                    lowerText.contains("yen") -> "¥"
+                    lowerText.contains("won") -> "₩"
+                    lowerText.contains("rupee") -> "₹"
+                    lowerText.contains("ringgit") || lowerText.contains("rm") -> "RM"
+                    else -> getSharedPreferences("ZeroTrackPrefs", android.content.Context.MODE_PRIVATE).getString("currency_symbol", "฿") ?: "฿"
+                }
+
+                saveTransaction(amount, detectedCurrency, text)
             } else {
                 Toast.makeText(this, "Could not parse amount from: $text", Toast.LENGTH_LONG).show()
                 finish()
@@ -106,11 +121,12 @@ class VoiceInputActivity : ComponentActivity() {
         }
     }
 
-    private fun saveTransaction(amount: Double, rawText: String) {
+    private fun saveTransaction(amount: Double, currency: String, rawText: String) {
         lifecycleScope.launch {
             val app = application as ZeroClickApplication
             val transaction = Transaction(
                 amount = amount,
+                currency = currency,
                 category = "Voice Input",
                 merchant = "Unknown",
                 source = "Voice",
@@ -121,7 +137,7 @@ class VoiceInputActivity : ComponentActivity() {
                 app.repository.insert(transaction)
             }
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@VoiceInputActivity, "Added ฿$amount", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@VoiceInputActivity, "Added $currency$amount", Toast.LENGTH_SHORT).show()
                 finish()
             }
         }
