@@ -98,8 +98,8 @@ class VoiceInputActivity : ComponentActivity() {
                 // Determine currency from spoken text
                 val lowerText = text.lowercase()
                 val detectedCurrency = when {
-                    lowerText.contains("kyat") || lowerText.contains("ks") || lowerText.contains("mmk") -> "Ks"
-                    lowerText.contains("baht") || lowerText.contains("thb") -> "฿"
+                    lowerText.contains("kyat") || lowerText.contains("ks") || lowerText.contains("mmk") || lowerText.contains("ကျပ်") -> "Ks"
+                    lowerText.contains("baht") || lowerText.contains("thb") || lowerText.contains("บาท") -> "฿"
                     lowerText.contains("dollar") || lowerText.contains("usd") -> "$"
                     lowerText.contains("euro") -> "€"
                     lowerText.contains("pound") -> "£"
@@ -137,7 +137,7 @@ class VoiceInputActivity : ComponentActivity() {
                 app.repository.insert(transaction)
             }
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@VoiceInputActivity, "Added $currency$amount", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@VoiceInputActivity, "Added $currency$amount (Heard: \"$rawText\")", Toast.LENGTH_LONG).show()
                 finish()
             }
         }
