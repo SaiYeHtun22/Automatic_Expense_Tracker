@@ -3,6 +3,7 @@ package com.example.zeroclickexpense.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.horizontalScroll
@@ -120,6 +121,31 @@ fun DashboardScreen(viewModel: ExpenseViewModel) {
     var transactionForAction by remember { mutableStateOf<Transaction?>(null) }
     var transactionForEdit by remember { mutableStateOf<Transaction?>(null) }
     var showDateRangePicker by remember { mutableStateOf(false) }
+
+    val initialDateMillis = remember(selectedMonth, filterMode) {
+        val now = Calendar.getInstance()
+        if (filterMode == FilterMode.MONTHLY) {
+            val isCurrentMonth = selectedMonth.year == now.get(Calendar.YEAR) && selectedMonth.month == now.get(Calendar.MONTH)
+            if (isCurrentMonth) {
+                now.timeInMillis
+            } else {
+                val cal = Calendar.getInstance().apply {
+                    set(Calendar.YEAR, selectedMonth.year)
+                    set(Calendar.MONTH, selectedMonth.month)
+                    val maxDay = getActualMaximum(Calendar.DAY_OF_MONTH)
+                    val targetDay = now.get(Calendar.DAY_OF_MONTH).coerceIn(1, maxDay)
+                    set(Calendar.DAY_OF_MONTH, targetDay)
+                    set(Calendar.HOUR_OF_DAY, 12)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                cal.timeInMillis
+            }
+        } else {
+            now.timeInMillis
+        }
+    }
 
     val dateRangeFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
@@ -429,13 +455,14 @@ fun DashboardScreen(viewModel: ExpenseViewModel) {
                 transaction = tx,
                 palette = palette,
                 onDismiss = { transactionForEdit = null },
-                onSave = { updatedAmount, isIncome, updatedMerchant, updatedCurrency ->
+                onSave = { updatedAmount, isIncome, updatedMerchant, updatedCurrency, updatedDate ->
                     viewModel.update(
                         tx.copy(
                             amount = updatedAmount,
                             isIncome = isIncome,
                             merchant = updatedMerchant,
-                            currency = updatedCurrency
+                            currency = updatedCurrency,
+                            date = updatedDate
                         )
                     )
                     transactionForEdit = null
@@ -447,16 +474,17 @@ fun DashboardScreen(viewModel: ExpenseViewModel) {
         if (showAddDialog) {
             AddTransactionDialog(
                 defaultCurrency = if (currentWallet == "ALL") defaultCurrency else currentWallet,
+                initialDate = initialDateMillis,
                 palette = palette,
                 onDismiss = { showAddDialog = false },
-                onAdd = { amount, isIncome, merchant, chosenCurrency ->
+                onAdd = { amount, isIncome, merchant, chosenCurrency, date ->
                     viewModel.insert(
                         Transaction(
                             amount = amount,
                             category = "Manual",
                             merchant = merchant,
                             source = "Manual Entry",
-                            date = System.currentTimeMillis(),
+                            date = date,
                             isIncome = isIncome,
                             currency = chosenCurrency
                         )
@@ -607,14 +635,18 @@ fun MinimalistTransactionItem(
 @Composable
 fun AddTransactionDialog(
     defaultCurrency: String,
+    initialDate: Long,
     palette: ZeroTrackColors,
     onDismiss: () -> Unit,
-    onAdd: (Double, Boolean, String, String) -> Unit
+    onAdd: (Double, Boolean, String, String, Long) -> Unit
 ) {
     var amountText by remember { mutableStateOf("") }
     var merchantText by remember { mutableStateOf("") }
     var isIncome by remember { mutableStateOf(false) }
     var selectedCurrency by remember { mutableStateOf(defaultCurrency) }
+    var selectedDate by remember { mutableLongStateOf(initialDate) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val dateFormatter = remember { SimpleDateFormat("dd MMMM yyyy", Locale.getDefault()) }
 
     val allCurrencies = listOf("฿", "Ks", "$", "€", "£", "¥", "₩", "₹", "RM")
 
@@ -652,6 +684,34 @@ fun AddTransactionDialog(
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
+
+                Text("DATE", style = MaterialTheme.typography.labelSmall, color = palette.mutedText, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(palette.surface)
+                        .border(1.dp, palette.border, RoundedCornerShape(12.dp))
+                        .clickable { showDatePicker = true }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.DateRange, contentDescription = "Select Date", tint = palette.accent, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = dateFormatter.format(Date(selectedDate)),
+                            color = palette.primaryText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Text("Change", color = palette.accent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
@@ -696,7 +756,13 @@ fun AddTransactionDialog(
                 onClick = {
                     val amount = amountText.toDoubleOrNull()
                     if (amount != null && amount > 0) {
-                        onAdd(amount, isIncome, merchantText.ifEmpty { if (isIncome) "Income" else "Expense" }, selectedCurrency)
+                        onAdd(
+                            amount,
+                            isIncome,
+                            merchantText.ifEmpty { if (isIncome) "Income" else "Expense" },
+                            selectedCurrency,
+                            selectedDate
+                        )
                     }
                 }
             ) {
@@ -709,6 +775,44 @@ fun AddTransactionDialog(
             }
         }
     )
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDate
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { utcMillis ->
+                            val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+                            val localCal = Calendar.getInstance().apply {
+                                set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+                                set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+                                set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
+                                set(Calendar.HOUR_OF_DAY, 12)
+                                set(Calendar.MINUTE, 0)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }
+                            selectedDate = localCal.timeInMillis
+                        }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("OK", color = palette.accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel", color = palette.mutedText)
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -717,12 +821,15 @@ fun EditTransactionDialog(
     transaction: Transaction,
     palette: ZeroTrackColors,
     onDismiss: () -> Unit,
-    onSave: (Double, Boolean, String, String) -> Unit
+    onSave: (Double, Boolean, String, String, Long) -> Unit
 ) {
     var amountText by remember { mutableStateOf(String.format(Locale.US, "%.2f", transaction.amount)) }
     var merchantText by remember { mutableStateOf(transaction.merchant) }
     var isIncome by remember { mutableStateOf(transaction.isIncome) }
     var selectedCurrency by remember { mutableStateOf(transaction.currency) }
+    var selectedDate by remember { mutableLongStateOf(transaction.date) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val dateFormatter = remember { SimpleDateFormat("dd MMMM yyyy", Locale.getDefault()) }
 
     val allCurrencies = listOf("฿", "Ks", "$", "€", "£", "¥", "₩", "₹", "RM")
 
@@ -760,6 +867,34 @@ fun EditTransactionDialog(
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
+
+                Text("DATE", style = MaterialTheme.typography.labelSmall, color = palette.mutedText, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(palette.surface)
+                        .border(1.dp, palette.border, RoundedCornerShape(12.dp))
+                        .clickable { showDatePicker = true }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.DateRange, contentDescription = "Select Date", tint = palette.accent, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = dateFormatter.format(Date(selectedDate)),
+                            color = palette.primaryText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Text("Change", color = palette.accent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
@@ -804,7 +939,13 @@ fun EditTransactionDialog(
                 onClick = {
                     val amount = amountText.toDoubleOrNull()
                     if (amount != null && amount > 0) {
-                        onSave(amount, isIncome, merchantText.ifEmpty { if (isIncome) "Income" else "Expense" }, selectedCurrency)
+                        onSave(
+                            amount,
+                            isIncome,
+                            merchantText.ifEmpty { if (isIncome) "Income" else "Expense" },
+                            selectedCurrency,
+                            selectedDate
+                        )
                     }
                 }
             ) {
@@ -817,6 +958,44 @@ fun EditTransactionDialog(
             }
         }
     )
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDate
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { utcMillis ->
+                            val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+                            val localCal = Calendar.getInstance().apply {
+                                set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+                                set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+                                set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
+                                set(Calendar.HOUR_OF_DAY, 12)
+                                set(Calendar.MINUTE, 0)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }
+                            selectedDate = localCal.timeInMillis
+                        }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("OK", color = palette.accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel", color = palette.mutedText)
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

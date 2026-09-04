@@ -38,6 +38,61 @@ class ExpenseNotificationListener : NotificationListenerService() {
 
             val combinedText = "$title $text".lowercase()
 
+            // 0. Filter Out OTPs & Verification Codes
+            val isOtpOrSecurity = listOf(
+                "otp", "verification code", "one-time password", "security code", "passcode", "verify your",
+                "do not share", "รหัส otp", "รหัสผ่าน", "รหัสยืนยัน", "อย่าบอกรหัส"
+            ).any { combinedText.contains(it) }
+            if (isOtpOrSecurity) {
+                Log.d("ZeroTrackListener", "Ignored OTP/security notification: $title - $text")
+                return
+            }
+
+            // 0. Filter Out Promotional / Marketing / Spam Messages
+            val promoKeywords = listOf(
+                "drops from", "get over", "% off", "percent off", "discount", "special deal",
+                "exclusive", "exclusively", "cashback", "shop now", "subscribe", "package", "special offer",
+                "voucher", "coupon", "congratulations", "chance to win", "valid until", "valid for",
+                "dial *", "press *", "tmn.app.link", "link:", "http://", "https://", "amaze app",
+                "free bonus", "buy 1 get 1", "promotion", "promo code", "promo", "deal today",
+                // Thai promo keywords
+                "โปรโมชั่น", "โปร", "ส่วนลด", "ลดทันที", "ได้ลด", "สิทธิพิเศษ", "แพ็กเกจ", "แพ็ก",
+                "เน็ต", "เน็ตไม่อั้น", "สมัคร", "สมัครเลย", "เติมเน็ต", "ฟรี", "คุ้ม", "คูปอง",
+                "รับเงินคืน", "คลิก", "กด *", "พิเศษ", "ของแถม"
+            )
+            if (promoKeywords.any { combinedText.contains(it) }) {
+                Log.d("ZeroTrackListener", "Ignored promotional notification: $title - $text")
+                return
+            }
+
+            // 0. Check Telecom Senders (True, AIS, DTAC, etc.) - Only allow if explicit payment confirmation
+            val isTelecomSender = listOf("true", "truemove", "truemove-h", "ais", "dtac", "nt mobile", "my by nt").any {
+                val cleanedTitle = title.trim().lowercase()
+                cleanedTitle == it || cleanedTitle.startsWith("$it ") || cleanedTitle.startsWith("$it-")
+            }
+            val isConfirmedBillPayment = listOf(
+                "payment received", "payment successful", "paid successfully", "receipt",
+                "ชำระเงินสำเร็จ", "ชำระค่าบริการสำเร็จ", "ยอดเงินคงเหลือ", "ใบเสร็จ"
+            ).any { combinedText.contains(it) }
+
+            if (isTelecomSender && !isConfirmedBillPayment) {
+                Log.d("ZeroTrackListener", "Ignored non-payment telecom message from $title: $text")
+                return
+            }
+
+            // 0. Verify SMS / Messaging Notifications have explicit financial action verbs
+            val isMessagingApp = packageName.contains("messaging") || packageName.contains("mms") || packageName.contains("sms")
+            val hasFinancialAction = listOf(
+                "paid", "spent", "debited", "charged", "payment of", "purchase of", "transferred", "withdrawn", "sent to",
+                "received", "credited", "deposit of", "transferred from", "refund",
+                "ชำระ", "จ่าย", "หักเงิน", "หักบัญชี", "โอนเงิน", "ถอนเงิน", "รับโอน", "เงินเข้า", "ได้รับเงิน"
+            ).any { combinedText.contains(it) }
+
+            if (isMessagingApp && !hasFinancialAction) {
+                Log.d("ZeroTrackListener", "Ignored messaging notification lacking financial action: $title - $text")
+                return
+            }
+
             // 1. Determine Currency (Multi-Wallet auto-detection)
             val transactionCurrency = when {
                 combinedText.contains("ks") || combinedText.contains("mmk") || combinedText.contains("kyat") || combinedText.contains("kbz") || combinedText.contains("aya bank") || combinedText.contains("cb bank") -> "Ks"
@@ -68,14 +123,13 @@ class ExpenseNotificationListener : NotificationListenerService() {
             val kbankRegex = Regex("Amount\\s+([\\d,]+\\.\\d{2})\\s+Baht", RegexOption.IGNORE_CASE)
             val kbankMatch = kbankRegex.find(text)
 
+            // Universal Worldwide Action Keywords (spent, paid, debited, charged, deposit, received, purchase)
+            val actionKeywordRegex = Regex("(?:spent|paid|debited|charged|purchase of|transfer of|deposit of|received|ชำระเงิน|จ่าย|หักบัญชี|โอนเงิน)\\s*([\\d,]+\\.?\\d*)", RegexOption.IGNORE_CASE)
+            val actionMatch = actionKeywordRegex.find(text)
+
             // Worldwide Universal Currency Regex (Matches XX.XX THB, Baht, บาท, Ks, MMK, $, EUR, GBP, JPY, KRW, MYR, INR, RM)
             val universalAfterRegex = Regex("([\\d,]+\\.\\d{2})\\s*(?:THB|Baht|บาท|Ks|MMK|USD|EUR|GBP|JPY|KRW|INR|MYR|\\$|€|£|¥|₩|₹|RM)", RegexOption.IGNORE_CASE)
             val universalBeforeRegex = Regex("(?:THB|Baht|บาท|Ks|MMK|USD|EUR|GBP|JPY|KRW|INR|MYR|\\$|€|£|¥|₩|₹|RM)\\s*([\\d,]+\\.\\d{2})", RegexOption.IGNORE_CASE)
-            
-            // Universal Worldwide Action Keywords (spent, paid, debited, charged, deposit, received, purchase)
-            val actionKeywordRegex = Regex("(?:spent|paid|debited|charged|purchase of|transfer of|deposit of|received)\\s*([\\d,]+\\.?\\d*)", RegexOption.IGNORE_CASE)
-
-            val universalMatch = universalAfterRegex.find(text) ?: universalBeforeRegex.find(text) ?: actionKeywordRegex.find(text)
 
             if (bkkMatch != null) {
                 amount = bkkMatch.groupValues[1].replace(",", "").toDoubleOrNull()
@@ -92,8 +146,14 @@ class ExpenseNotificationListener : NotificationListenerService() {
             } else if (kbankMatch != null) {
                 amount = kbankMatch.groupValues[1].replace(",", "").toDoubleOrNull()
                 merchantName = "K PLUS"
-            } else if (universalMatch != null) {
-                amount = universalMatch.groupValues[1].replace(",", "").toDoubleOrNull()
+            } else if (actionMatch != null) {
+                amount = actionMatch.groupValues[1].replace(",", "").toDoubleOrNull()
+            } else if (!isMessagingApp) {
+                // For non-messaging apps, fallback to currency pattern if present
+                val universalMatch = universalAfterRegex.find(text) ?: universalBeforeRegex.find(text)
+                if (universalMatch != null) {
+                    amount = universalMatch.groupValues[1].replace(",", "").toDoubleOrNull()
+                }
             }
 
             // Check if amount was extracted
